@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>サッカーリーグ表マネージャー</title>
+    <style>
+        :root {
+            --primary: #1565C0; /* 濃い青 */
+            --accent: #FFC107; /* アンバー */
+            --bg: #f4f6f8;
+            --white: #ffffff;
+            --text: #333;
+            --danger: #D32F2F;
+        }
+
+        body {
+            font-family: "Helvetica Neue", Arial, sans-serif;
+            margin: 0; padding: 0;
+            background-color: var(--bg); color: var(--text);
+            display: flex; flex-direction: column; height: 100vh;
+        }
+
+        /* ヘッダーとタブナビゲーション */
+        header { background: var(--primary); color: white; padding: 10px 0 0 0; text-align: center; flex-shrink: 0; }
+        h1 { margin: 0 0 10px 0; font-size: 1.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 10px; }
+        
+        .tabs { display: flex; width: 100%; max-width: 800px; margin: 0 auto; }
+        .tab {
+            flex: 1; padding: 12px; text-align: center; cursor: pointer;
+            background: rgba(255,255,255,0.1); color: #ddd; font-weight: bold; font-size: 0.9rem;
+            border-radius: 8px 8px 0 0; transition: 0.3s;
+        }
+        .tab.active { background: var(--bg); color: var(--primary); }
+
+        /* メインコンテンツエリア */
+        main { flex-grow: 1; overflow-y: auto; padding: 15px; max-width: 800px; margin: 0 auto; width: 100%; box-sizing: border-box;}
+        .content-section { display: none; }
+        .content-section.active { display: block; animation: fadeIn 0.3s; }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* UIパーツ */
+        .card { background: var(--white); border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); padding: 15px; margin-bottom: 15px; }
+        h2 { font-size: 1rem; margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 8px; color: var(--primary); }
+        
+        button {
+            background: var(--primary); color: white; border: none; padding: 12px;
+            border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 0.9rem; width: 100%; margin-top: 5px;
+        }
+        button:active { opacity: 0.8; }
+        button.secondary { background: #757575; }
+        button.danger { background: var(--danger); margin-top: 20px;}
+        
+        input, select {
+            padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 100%; box-sizing: border-box; margin-bottom: 10px; font-size: 1rem;
+        }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.85rem; color: #555; }
+
+        /* 順位表テーブル */
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        th, td { padding: 8px 4px; text-align: center; border-bottom: 1px solid #eee; }
+        th { background: #eee; color: #555; font-weight: bold; }
+        tr:nth-child(even) { background-color: #fafafa; }
+        .rank-1 { background-color: #fff8e1 !important; border-left: 4px solid var(--accent); } 
+        .col-team { text-align: left; font-weight: bold; min-width: 80px; }
+        .col-pts { font-weight: bold; color: var(--primary); background: rgba(21, 101, 192, 0.05); }
+
+        /* 試合結果リスト */
+        .match-card {
+            display: flex; align-items: center; justify-content: space-between;
+            background: white; border: 1px solid #ddd; padding: 10px; margin-bottom: 8px; border-radius: 8px;
+        }
+        .match-team { flex: 1; text-align: center; font-weight: bold; font-size: 0.9rem; }
+        .match-score { 
+            background: #eee; padding: 5px 12px; border-radius: 4px; font-weight: bold; font-size: 1.1rem; margin: 0 10px; min-width: 50px; text-align: center;
+        }
+        .btn-delete { background: none; border: none; color: #999; width: auto; padding: 5px; font-size: 1.2rem; margin-top: 0;}
+
+        /* チームリスト */
+        .team-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; }
+
+    </style>
+</head>
+<body>
+
+<header>
+    <h1 id="headerTitle">⚽ リーグ戦マネージャー</h1>
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('standings')">順位表</div>
+        <div class="tab" onclick="switchTab('matches')">試合結果</div>
+        <div class="tab" onclick="switchTab('teams')">設定・登録</div>
+    </div>
+</header>
+
+<main>
+    <div id="standings" class="content-section active">
+        <div class="card" style="padding: 0; overflow: hidden;">
+            <table id="standingsTable">
+                <thead>
+                    <tr>
+                        <th width="10%">順</th>
+                        <th class="col-team">チーム</th>
+                        <th class="col-pts" width="12%">点</th>
+                        <th width="12%">得失</th>
+                        <th width="10%">試</th>
+                        <th width="10%">勝</th>
+                        <th width="10%">分</th>
+                        <th width="10%">負</th>
+                    </tr>
+                </thead>
+                <tbody id="standingsBody">
+                    </tbody>
+            </table>
+        </div>
+        <div style="text-align: right; font-size: 0.8rem; color: #666; padding: 5px;">
+            勝ち点3, 分け1, 負け0
+        </div>
+    </div>
+
+    <div id="matches" class="content-section">
+        <div class="card">
+            <h2>試合結果を入力</h2>
+            <div style="display: flex; gap: 5px; align-items: center; margin-bottom: 10px;">
+                <select id="teamASelect"><option value="">チームA</option></select>
+                <span style="font-weight: bold;">VS</span>
+                <select id="teamBSelect"><option value="">チームB</option></select>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <input type="number" id="scoreA" placeholder="点" inputmode="numeric" style="text-align: center;">
+                <span>-</span>
+                <input type="number" id="scoreB" placeholder="点" inputmode="numeric" style="text-align: center;">
+            </div>
+            <button onclick="addMatch()">結果を登録</button>
+        </div>
+
+        <h3 style="font-size: 0.9rem; color: #666; margin-left: 5px;">試合履歴</h3>
+        <div id="matchList">
+            </div>
+    </div>
+
+    <div id="teams" class="content-section">
+        
+        <div class="card">
+            <h2>大会設定</h2>
+            <label>大会名</label>
+            <input type="text" id="tournamentNameInput" placeholder="大会名を入力 (例: 第5回 ○○カップ)">
+            <button class="secondary" onclick="saveTournamentName()">大会名を保存・変更</button>
+        </div>
+
+        <div class="card">
+            <h2>新規チーム登録</h2>
+            <label>チーム名</label>
+            <input type="text" id="newTeamName" placeholder="チーム名 (例: FC東京)">
+            <button onclick="addTeam()">追加</button>
+        </div>
+
+        <div class="card">
+            <h2>登録済みチーム</h2>
+            <div id="teamList">
+                </div>
+        </div>
+
+        <button class="danger" onclick="resetAllData()">データを全てリセット</button>
+    </div>
+</main>
+
+<script>
+    // --- データ管理 ---
+    const STORAGE_KEY = 'soccerLeagueApp_v2'; // バージョン変更
+    let appData = {
+        tournamentName: "リーグ戦マネージャー", // デフォルト名
+        teams: [],
+        matches: []
+    };
+
+    // 初期化
+    window.onload = function() {
+        loadData();
+        renderAll();
+    };
+
+    function loadData() {
+        const data = localStorage.getItem(STORAGE_KEY);
+        if (data) {
+            try {
+                const parsed = JSON.parse(data);
+                appData.teams = parsed.teams || [];
+                appData.matches = parsed.matches || [];
+                appData.tournamentName = parsed.tournamentName || "リーグ戦マネージャー";
+            } catch(e) {
+                console.error("データ読み込みエラー", e);
+            }
+        }
+        updateHeaderTitle();
+    }
+
+    function saveData() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+    }
+
+    // --- ロジック: 大会名設定 ---
+    function saveTournamentName() {
+        const input = document.getElementById('tournamentNameInput');
+        const name = input.value.trim();
+        if (!name) return alert('大会名を入力してください');
+        
+        appData.tournamentName = name;
+        saveData();
+        updateHeaderTitle();
+        alert('大会名を変更しました');
+    }
+
+    function updateHeaderTitle() {
+        document.getElementById('headerTitle').textContent = '⚽ ' + appData.tournamentName;
+        // 設定画面のインプットにも反映
+        document.getElementById('tournamentNameInput').value = appData.tournamentName;
+    }
+
+    // --- ロジック: 順位計算 ---
+    function calculateStandings() {
+        let stats = {};
+        appData.teams.forEach(team => {
+            stats[team.id] = {
+                id: team.id, name: team.name,
+                played: 0, won: 0, drawn: 0, lost: 0,
+                gf: 0, ga: 0, gd: 0, points: 0
+            };
+        });
+
+        appData.matches.forEach(match => {
+            const statA = stats[match.teamA];
+            const statB = stats[match.teamB];
+            if (!statA || !statB) return;
+
+            const sA = parseInt(match.scoreA);
+            const sB = parseInt(match.scoreB);
+
+            statA.played++; statB.played++;
+            statA.gf += sA; statA.ga += sB;
+            statB.gf += sB; statB.ga += sA;
+
+            if (sA > sB) {
+                statA.won++; statA.points += 3; statB.lost++;
+            } else if (sA < sB) {
+                statB.won++; statB.points += 3; statA.lost++;
+            } else {
+                statA.drawn++; statA.points += 1;
+                statB.drawn++; statB.points += 1;
+            }
+        });
+
+        let standings = Object.values(stats).map(s => {
+            s.gd = s.gf - s.ga;
+            return s;
+        });
+
+        standings.sort((a, b) => {
+            if (b.points !== a.points) return b.points - a.points;
+            if (b.gd !== a.gd) return b.gd - a.gd;
+            return b.gf - a.gf;
+        });
+
+        return standings;
+    }
+
+    // --- 操作系関数 ---
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.content-section').forEach(c => c.classList.remove('active'));
+        
+        const targetTab = Array.from(document.querySelectorAll('.tab')).find(t => t.getAttribute('onclick').includes(tabId));
+        if(targetTab) targetTab.classList.add('active');
+        document.getElementById(tabId).classList.add('active');
+    }
+
+    function addTeam() {
+        const input = document.getElementById('newTeamName');
+        const name = input.value.trim();
+        if (!name) return alert('チーム名を入力してください');
+
+        appData.teams.push({ id: 't' + Date.now(), name: name });
+        input.value = '';
+        saveData();
+        renderAll();
+    }
+
+    function addMatch() {
+        const tA = document.getElementById('teamASelect').value;
+        const tB = document.getElementById('teamBSelect').value;
+        const sA = document.getElementById('scoreA').value;
+        const sB = document.getElementById('scoreB').value;
+
+        if (!tA || !tB) return alert('対戦チームを選択してください');
+        if (tA === tB) return alert('同じチーム同士は対戦できません');
+        if (sA === '' || sB === '') return alert('スコアを入力してください');
+
+        appData.matches.unshift({
+            id: 'm' + Date.now(),
+            teamA: tA, teamB: tB,
+            scoreA: parseInt(sA), scoreB: parseInt(sB),
+            timestamp: Date.now()
+        });
+
+        document.getElementById('scoreA').value = '';
+        document.getElementById('scoreB').value = '';
+        
+        saveData();
+        renderAll();
+        switchTab('standings');
+    }
+
+    function deleteMatch(matchId) {
+        if (!confirm('この試合結果を削除しますか？')) return;
+        appData.matches = appData.matches.filter(m => m.id !== matchId);
+        saveData();
+        renderAll();
+    }
+
+    function resetAllData() {
+        if (!confirm('【警告】\n全てのデータを削除します。\nよろしいですか？')) return;
+        localStorage.removeItem(STORAGE_KEY);
+        appData = { tournamentName: "リーグ戦マネージャー", teams: [], matches: [] };
+        location.reload();
+    }
+
+    // --- 描画系関数 ---
+    function renderAll() {
+        renderTeams();
+        renderMatches();
+        renderStandings();
+        updateHeaderTitle(); // 大会名も描画
+    }
+
+    function renderTeams() {
+        const selectA = document.getElementById('teamASelect');
+        const selectB = document.getElementById('teamBSelect');
+        const list = document.getElementById('teamList');
+
+        selectA.innerHTML = '<option value="">チームA</option>';
+        selectB.innerHTML = '<option value="">チームB</option>';
+        list.innerHTML = '';
+
+        appData.teams.forEach(team => {
+            const optA = document.createElement('option');
+            optA.value = team.id; optA.innerText = team.name;
+            selectA.appendChild(optA);
+
+            const optB = document.createElement('option');
+            optB.value = team.id; optB.innerText = team.name;
+            selectB.appendChild(optB.cloneNode(true));
+
+            const div = document.createElement('div');
+            div.className = 'team-item';
+            div.innerText = team.name;
+            list.appendChild(div);
+        });
+    }
+
+    function renderMatches() {
+        const list = document.getElementById('matchList');
+        list.innerHTML = '';
+
+        if (appData.matches.length === 0) {
+            list.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">試合結果なし</div>';
+            return;
+        }
+
+        appData.matches.forEach(match => {
+            const teamA = appData.teams.find(t => t.id === match.teamA);
+            const teamB = appData.teams.find(t => t.id === match.teamB);
+            const nameA = teamA ? teamA.name : '削除済';
+            const nameB = teamB ? teamB.name : '削除済';
+
+            const div = document.createElement('div');
+            div.className = 'match-card';
+            div.innerHTML = `
+                <div class="match-team">${nameA}</div>
+                <div class="match-score">${match.scoreA} - ${match.scoreB}</div>
+                <div class="match-team">${nameB}</div>
+                <button class="btn-delete" onclick="deleteMatch('${match.id}')">×</button>
+            `;
+            list.appendChild(div);
+        });
+    }
+
+    function renderStandings() {
+        const tbody = document.getElementById('standingsBody');
+        tbody.innerHTML = '';
+        const standings = calculateStandings();
+
+        if (standings.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="padding:20px; color:#999;">チームを登録してください</td></tr>';
+            return;
+        }
+
+        standings.forEach((team, index) => {
+            const tr = document.createElement('tr');
+            if (index === 0) tr.classList.add('rank-1');
+
+            tr.innerHTML = `
+                <td>${index + 1}</td>
+                <td class="col-team">${team.name}</td>
+                <td class="col-pts">${team.points}</td>
+                <td>${team.gd > 0 ? '+'+team.gd : team.gd}</td>
+                <td>${team.played}</td>
+                <td>${team.won}</td>
+                <td>${team.drawn}</td>
+                <td>${team.lost}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+</script>
+</body>
+</html>
