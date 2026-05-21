@@ -179,7 +179,7 @@
                 <button class="secondary" onclick="updateTournamentName()">大会名を更新</button>
             </div>
             
-            <button onclick="location.reload()" style="background:#666; margin-top:20px;">ログアウト</button>
+            <button onclick="logoutLeague()" style="background:#666; margin-top:20px;">ログアウト</button>
         </div>
     </div>
 </div>
@@ -231,12 +231,22 @@
         }, 3000);
     }
 
+    // --- ログアウト処理 ---
+    function logoutLeague() {
+        if (confirm("ログアウトしますか？")) {
+            localStorage.removeItem('savedLeagueId');
+            location.reload();
+        }
+    }
+
     // --- 1. ログイン処理 ---
     function joinLeague() {
         const id = document.getElementById('leagueIdInput').value.trim();
         if (!id) return alert("IDを入力してください");
         
         currentLeagueId = id;
+        localStorage.setItem('savedLeagueId', id); // 大会IDを記憶
+        
         document.getElementById('displayId').innerText = id;
         document.getElementById('loginArea').style.display = 'none';
         document.getElementById('appArea').style.display = 'block';
@@ -608,6 +618,15 @@
         const tabBtn = Array.from(document.querySelectorAll('.tab')).find(el => el.getAttribute('onclick').includes(id));
         if(tabBtn) tabBtn.classList.add('active');
     }
+
+    // --- 自動ログイン処理 ---
+    window.addEventListener('DOMContentLoaded', () => {
+        const savedId = localStorage.getItem('savedLeagueId');
+        if (savedId) {
+            document.getElementById('leagueIdInput').value = savedId;
+            joinLeague();
+        }
+    });
 </script>
 <!-- トースト通知 -->
 <div id="toastNotification" class="toast-container">
