@@ -88,6 +88,15 @@
     <div id="loginArea">
         <h2>大会IDを入力</h2>
         <input type="text" id="leagueIdInput" placeholder="例: cup2025" style="text-align:center; font-size:1.2rem;">
+        
+        <div style="margin-bottom: 15px; text-align: center;">
+            <label style="font-weight: bold; margin-right: 10px; font-size: 1rem; color: var(--primary);">ユーザー区分:</label>
+            <select id="userRoleInput" style="width: auto; display: inline-block; padding: 5px 15px; font-size: 1rem; margin-bottom: 0;">
+                <option value="general">一般（閲覧専用）</option>
+                <option value="referee">審判・管理者（編集可能）</option>
+            </select>
+        </div>
+        
         <button onclick="joinLeague()">参加 / 作成する</button>
     </div>
 
@@ -215,6 +224,7 @@
     // 編集用変数
     let isEditing = false;
     let editingMatchKey = null;
+    let currentUserRole = "general"; // 'general' (一般) or 'referee' (審判)
 
     // リアルタイム同期・トースト通知用変数
     let isFirstLoad = true;
@@ -235,7 +245,28 @@
     function logoutLeague() {
         if (confirm("ログアウトしますか？")) {
             localStorage.removeItem('savedLeagueId');
+            localStorage.removeItem('savedUserRole');
             location.reload();
+        }
+    }
+
+    // 役割（ユーザー区分）に応じたUIタブの表示制御
+    function applyRoleUI() {
+        const roleText = currentUserRole === 'referee' ? '審判・管理者' : '一般閲覧';
+        document.getElementById('displayId').innerHTML = `${currentLeagueId} <span style="font-weight:normal;color:#666;">(${roleText})</span>`;
+        
+        // タブボタンの取得
+        const tabList = Array.from(document.querySelectorAll('.tab'));
+        const inputMatchTab = tabList.find(el => el.getAttribute('onclick').includes('inputMatch'));
+        const settingsTab = tabList.find(el => el.getAttribute('onclick').includes('settings'));
+        
+        if (currentUserRole === 'general') {
+            if(inputMatchTab) inputMatchTab.style.display = 'none';
+            if(settingsTab) settingsTab.style.display = 'none';
+            showTab('standings'); // 強制的に順位表タブへ
+        } else {
+            if(inputMatchTab) inputMatchTab.style.display = 'block';
+            if(settingsTab) settingsTab.style.display = 'block';
         }
     }
 
@@ -244,12 +275,18 @@
         const id = document.getElementById('leagueIdInput').value.trim();
         if (!id) return alert("IDを入力してください");
         
+        const role = document.getElementById('userRoleInput').value;
+        currentUserRole = role;
+        
         currentLeagueId = id;
         localStorage.setItem('savedLeagueId', id); // 大会IDを記憶
+        localStorage.setItem('savedUserRole', role); // ユーザー区分を記憶
         
         document.getElementById('displayId').innerText = id;
         document.getElementById('loginArea').style.display = 'none';
         document.getElementById('appArea').style.display = 'block';
+
+        applyRoleUI(); // UIの制限を適用
 
         db.ref('leagues/' + currentLeagueId).on('value', (snapshot) => {
             const val = snapshot.val();
@@ -494,6 +531,13 @@
             playedMatches.forEach(m => {
                 const nameA = appData.teams[m.teamA]?.name || "削除済";
                 const nameB = appData.teams[m.teamB]?.name || "削除済";
+                const actionButtons = currentUserRole === 'referee' ? `
+                    <div class="item-actions">
+                        <button class="edit-btn" onclick="editMatch('${m.key}')">編集</button>
+                        <button class="delete-btn" onclick="deleteMatch('${m.key}')">削除</button>
+                    </div>
+                ` : "";
+
                 matchListEl.innerHTML += `
                     <div class="list-item">
                         <div class="match-info">
@@ -501,10 +545,7 @@
                             <span class="score-box" style="background:#e3f2fd; color:#0d47a1;">${m.scoreA} - ${m.scoreB}</span>
                             <span style="flex:1; text-align:left; font-size:0.9rem; font-weight:bold;">${nameB}</span>
                         </div>
-                        <div class="item-actions">
-                            <button class="edit-btn" onclick="editMatch('${m.key}')">編集</button>
-                            <button class="delete-btn" onclick="deleteMatch('${m.key}')">削除</button>
-                        </div>
+                        ${actionButtons}
                     </div>
                 `;
             });
@@ -622,8 +663,10 @@
     // --- 自動ログイン処理 ---
     window.addEventListener('DOMContentLoaded', () => {
         const savedId = localStorage.getItem('savedLeagueId');
+        const savedRole = localStorage.getItem('savedUserRole') || 'general';
         if (savedId) {
             document.getElementById('leagueIdInput').value = savedId;
+            document.getElementById('userRoleInput').value = savedRole;
             joinLeague();
         }
     });
