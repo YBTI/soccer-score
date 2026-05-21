@@ -48,6 +48,33 @@
         .item-actions { display: flex; gap: 5px; }
 
         .editing-notice { background: #fff3cd; color: #856404; padding: 10px; border-radius: 4px; margin-bottom: 10px; display: none; text-align: center; border: 1px solid #ffeeba; }
+
+        /* トースト通知 */
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: rgba(33, 33, 33, 0.95);
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+            z-index: 1000;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s;
+            opacity: 0;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            backdrop-filter: blur(5px);
+        }
+        .toast-container.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -69,7 +96,7 @@
         
         <div class="tabs">
             <div class="tab active" onclick="showTab('standings')">順位表 & 結果</div>
-            <div class="tab" onclick="showTab('inputMatch')">試合入力</div>
+            <div class="tab" onclick="showTab('inputMatch')">日程 & 試合入力</div>
             <div class="tab" onclick="showTab('settings')">設定</div>
         </div>
 
@@ -90,22 +117,49 @@
         </div>
 
         <div id="inputMatch" class="content">
-            <div class="card">
-                <h3 id="inputFormTitle">試合結果の入力</h3>
+            <!-- 1. 対戦予定の登録（事前登録） -->
+            <div class="card" id="fixtureRegisterCard">
+                <h3>対戦カード（予定）の登録</h3>
+                <div style="display:flex; gap:10px; align-items: center; margin-bottom: 10px;">
+                    <select id="fixtureTeamA" style="margin-bottom:0;"></select>
+                    <span style="font-weight: bold; color: var(--primary); flex-shrink: 0;">VS</span>
+                    <select id="fixtureTeamB" style="margin-bottom:0;"></select>
+                </div>
+                <button onclick="addFixture()" style="background: var(--primary); margin-bottom: 0;">対戦カードを登録</button>
+            </div>
+
+            <!-- 2. 試合結果・スコアの入力/編集 -->
+            <div class="card" id="matchInputCard" style="display:none; border: 2px solid var(--accent); margin-top: 15px;">
+                <h3 id="inputFormTitle">スコアの入力</h3>
                 
-                <div id="editingNotice" class="editing-notice">
-                    📝 過去のデータを編集中です
+                <div id="editingNotice" class="editing-notice" style="display:block; margin-bottom: 15px;">
+                    📝 スコアを入力・変更してください
                     <button onclick="cancelEdit()" style="width:auto; padding:2px 8px; margin-left:10px; background:#666; font-size:0.8rem;">キャンセル</button>
                 </div>
 
-                <div style="display:flex; gap:5px;">
-                    <select id="teamA"></select> <span>VS</span> <select id="teamB"></select>
-                </div>
-                <div style="display:flex; gap:5px;">
-                    <input type="number" id="scoreA" placeholder="点"> - <input type="number" id="scoreB" placeholder="点">
+                <div style="display:flex; gap:5px; align-items: center; justify-content: center; margin-bottom: 15px; font-weight: bold;">
+                    <span id="displayTeamA" style="flex:1; text-align:right; font-size: 1.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">チームA</span>
+                    <span style="color: var(--primary); margin: 0 10px; flex-shrink: 0;">VS</span>
+                    <span id="displayTeamB" style="flex:1; text-align:left; font-size: 1.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">チームB</span>
                 </div>
                 
-                <button id="submitMatchBtn" onclick="saveMatch()">結果を登録</button>
+                <!-- 内部的な値保持用の隠しフィールド -->
+                <input type="hidden" id="teamA">
+                <input type="hidden" id="teamB">
+
+                <div style="display:flex; gap:10px; justify-content: center; align-items: center;">
+                    <input type="number" id="scoreA" placeholder="点" style="text-align: center; font-size: 1.2rem; width: 80px; margin-bottom: 0;">
+                    <span style="font-size: 1.5rem; font-weight: bold;">-</span>
+                    <input type="number" id="scoreB" placeholder="点" style="text-align: center; font-size: 1.2rem; width: 80px; margin-bottom: 0;">
+                </div>
+                
+                <button id="submitMatchBtn" onclick="saveMatch()" style="margin-top: 15px; margin-bottom: 0;">スコアを登録</button>
+            </div>
+
+            <!-- 3. 登録済みの対戦スケジュール（予定と結果） -->
+            <div class="card" style="margin-top: 15px;">
+                <h3>対戦スケジュール一覧</h3>
+                <div id="fixtureList"></div>
             </div>
         </div>
 
@@ -162,6 +216,21 @@
     let isEditing = false;
     let editingMatchKey = null;
 
+    // リアルタイム同期・トースト通知用変数
+    let isFirstLoad = true;
+    let lastDataString = "";
+
+    function showToast(message) {
+        const toast = document.getElementById('toastNotification');
+        toast.querySelector('.toast-text').innerText = message;
+        toast.classList.add('show');
+        
+        // 3秒後に非表示
+        setTimeout(() => {
+            toast.classList.remove('show');
+        }, 3000);
+    }
+
     // --- 1. ログイン処理 ---
     function joinLeague() {
         const id = document.getElementById('leagueIdInput').value.trim();
@@ -174,6 +243,15 @@
 
         db.ref('leagues/' + currentLeagueId).on('value', (snapshot) => {
             const val = snapshot.val();
+            
+            // データ更新トースト通知のトリガー判定
+            const currentDataString = JSON.stringify(val);
+            if (!isFirstLoad && lastDataString && lastDataString !== currentDataString) {
+                showToast("大会データがリアルタイム更新されました ⚽");
+            }
+            lastDataString = currentDataString;
+            isFirstLoad = false;
+
             if (val) {
                 appData = val;
                 if(!appData.teams) appData.teams = {};
@@ -215,7 +293,7 @@
         }
     }
 
-    // --- 3. データ操作（試合・大会名） ---
+    // --- 3. データ操作（対戦カード・試合結果・大会名） ---
 
     function updateTournamentName() {
         const name = document.getElementById('tournamentNameInput').value.trim();
@@ -224,58 +302,113 @@
         alert("大会名を更新しました");
     }
 
+    // 事前の対戦カード（予定）の追加
+    function addFixture() {
+        const tA = document.getElementById('fixtureTeamA').value;
+        const tB = document.getElementById('fixtureTeamB').value;
+
+        if (!tA || !tB || tA === tB) return alert("対戦する2つの異なるチームを選択してください");
+
+        const matchData = {
+            teamA: tA,
+            teamB: tB,
+            scoreA: "",
+            scoreB: "",
+            status: 'scheduled',
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+        };
+
+        const newRef = db.ref('leagues/' + currentLeagueId + '/matches').push();
+        newRef.set(matchData)
+            .then(() => {
+                document.getElementById('fixtureTeamA').value = "";
+                document.getElementById('fixtureTeamB').value = "";
+            });
+    }
+
+    // 対戦予定カードからスコア入力を開始する
+    function startScoreInput(key) {
+        const match = appData.matches[key];
+        if(!match) return;
+
+        isEditing = true;
+        editingMatchKey = key;
+
+        const nameA = appData.teams[match.teamA]?.name || "削除済";
+        const nameB = appData.teams[match.teamB]?.name || "削除済";
+
+        // スコア入力エリアのUIを更新
+        document.getElementById('displayTeamA').innerText = nameA;
+        document.getElementById('displayTeamB').innerText = nameB;
+        document.getElementById('teamA').value = match.teamA;
+        document.getElementById('teamB').value = match.teamB;
+
+        // 既存の得点値をセット（予定状態なら空文字にする）
+        const isScheduled = match.status === 'scheduled';
+        document.getElementById('scoreA').value = isScheduled ? "" : (match.scoreA !== undefined ? match.scoreA : "");
+        document.getElementById('scoreB').value = isScheduled ? "" : (match.scoreB !== undefined ? match.scoreB : "");
+
+        document.getElementById('inputFormTitle').innerText = isScheduled ? "スコアの入力" : "スコアの編集";
+        document.getElementById('submitMatchBtn').innerText = isScheduled ? "スコアを登録" : "更新する";
+        document.getElementById('submitMatchBtn').style.background = isScheduled ? "" : "#4CAF50";
+
+        // 得点入力フォームを可視化してフォーカス
+        const inputCard = document.getElementById('matchInputCard');
+        inputCard.style.display = "block";
+        inputCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        setTimeout(() => {
+            document.getElementById('scoreA').focus();
+        }, 200);
+    }
+
+    // 結果の編集開始（試合履歴側から呼び出された場合のエイリアス）
+    function editMatch(key) {
+        startScoreInput(key);
+    }
+
     function saveMatch() {
         const tA = document.getElementById('teamA').value;
         const tB = document.getElementById('teamB').value;
         const sA = document.getElementById('scoreA').value;
         const sB = document.getElementById('scoreB').value;
 
-        if (!tA || !tB || tA === tB || sA === "" || sB === "") return alert("入力内容を確認してください");
+        if (!tA || !tB || tA === tB || sA === "" || sB === "") return alert("得点を入力してください");
 
         const matchData = {
-            teamA: tA, teamB: tB,
-            scoreA: parseInt(sA), scoreB: parseInt(sB),
+            teamA: tA,
+            teamB: tB,
+            scoreA: parseInt(sA),
+            scoreB: parseInt(sB),
+            status: 'played',
             timestamp: firebase.database.ServerValue.TIMESTAMP
         };
 
         if (isEditing && editingMatchKey) {
             db.ref('leagues/' + currentLeagueId + '/matches/' + editingMatchKey).update(matchData)
                 .then(() => {
-                    alert("試合結果を更新しました");
                     cancelEdit();
                     showTab('standings');
                 });
         } else {
+            // 新規直接登録（フォールバック用）
             const newRef = db.ref('leagues/' + currentLeagueId + '/matches').push();
             newRef.set(matchData)
                 .then(() => {
-                    document.getElementById('scoreA').value = "";
-                    document.getElementById('scoreB').value = "";
+                    cancelEdit();
                     showTab('standings');
                 });
         }
     }
 
     function deleteMatch(key) {
-        if(confirm("この試合記録を削除しますか？")) {
+        if(confirm("この試合記録・予定を削除しますか？")) {
+            // 編集中ならキャンセルする
+            if(editingMatchKey === key) {
+                cancelEdit();
+            }
             db.ref('leagues/' + currentLeagueId + '/matches/' + key).remove();
         }
-    }
-
-    function editMatch(key) {
-        const match = appData.matches[key];
-        if(!match) return;
-        isEditing = true;
-        editingMatchKey = key;
-        document.getElementById('teamA').value = match.teamA;
-        document.getElementById('teamB').value = match.teamB;
-        document.getElementById('scoreA').value = match.scoreA;
-        document.getElementById('scoreB').value = match.scoreB;
-        document.getElementById('inputFormTitle').innerText = "試合結果の編集";
-        document.getElementById('submitMatchBtn').innerText = "更新する";
-        document.getElementById('submitMatchBtn').style.background = "#4CAF50";
-        document.getElementById('editingNotice').style.display = "block";
-        showTab('inputMatch');
     }
 
     function cancelEdit() {
@@ -283,10 +416,9 @@
         editingMatchKey = null;
         document.getElementById('scoreA').value = "";
         document.getElementById('scoreB').value = "";
-        document.getElementById('inputFormTitle').innerText = "試合結果の入力";
-        document.getElementById('submitMatchBtn').innerText = "結果を登録";
-        document.getElementById('submitMatchBtn').style.background = "";
-        document.getElementById('editingNotice').style.display = "none";
+        document.getElementById('teamA').value = "";
+        document.getElementById('teamB').value = "";
+        document.getElementById('matchInputCard').style.display = "none";
     }
 
     // --- 4. 描画・計算処理 ---
@@ -301,11 +433,11 @@
             ...appData.matches[key], key: key
         })).sort((a,b) => b.timestamp - a.timestamp);
 
-        // --- チーム選択肢 & 設定画面リストの更新 ---
-        const selA = document.getElementById('teamA');
-        const selB = document.getElementById('teamB');
-        const currentValA = selA.value;
-        const currentValB = selB.value;
+        // --- チーム選択肢（対戦予定登録用） & 設定画面リストの更新 ---
+        const fSelA = document.getElementById('fixtureTeamA');
+        const fSelB = document.getElementById('fixtureTeamB');
+        const currentFSelA = fSelA.value;
+        const currentFSelB = fSelB.value;
         const teamListSettings = document.getElementById('teamListSettings');
         
         let optionsHtml = '<option value="">選択</option>';
@@ -331,37 +463,92 @@
             `;
         });
         
-        selA.innerHTML = optionsHtml;
-        selB.innerHTML = optionsHtml;
+        fSelA.innerHTML = optionsHtml;
+        fSelB.innerHTML = optionsHtml;
         
         // 選択状態の復元
-        if(isEditing) {
-            selA.value = document.getElementById('teamA').value || currentValA;
-            selB.value = document.getElementById('teamB').value || currentValB;
-        } else if (currentValA && currentValB) {
-            selA.value = currentValA;
-            selB.value = currentValB;
-        }
+        fSelA.value = currentFSelA;
+        fSelB.value = currentFSelB;
 
-        // --- 試合履歴描画 ---
+        // --- 試合結果履歴（順位表＆結果タブ用：消化済みの試合のみ） ---
+        const playedMatches = matchesWithKey.filter(m => {
+            // 後方互換性：statusが未定義でもスコアがあれば消化済みとする
+            return m.status === 'played' || (m.status === undefined && m.scoreA !== undefined && m.scoreA !== "");
+        });
+
         const matchListEl = document.getElementById('matchList');
         matchListEl.innerHTML = "";
-        if(matchesWithKey.length === 0) {
+        if(playedMatches.length === 0) {
              matchListEl.innerHTML = "<div style='text-align:center; color:#999; padding:10px;'>試合データはありません</div>";
         } else {
-            matchesWithKey.forEach(m => {
+            playedMatches.forEach(m => {
                 const nameA = appData.teams[m.teamA]?.name || "削除済";
                 const nameB = appData.teams[m.teamB]?.name || "削除済";
                 matchListEl.innerHTML += `
                     <div class="list-item">
                         <div class="match-info">
-                            <span style="flex:1; text-align:right; font-size:0.9rem;">${nameA}</span>
-                            <span class="score-box">${m.scoreA} - ${m.scoreB}</span>
-                            <span style="flex:1; text-align:left; font-size:0.9rem;">${nameB}</span>
+                            <span style="flex:1; text-align:right; font-size:0.9rem; font-weight:bold;">${nameA}</span>
+                            <span class="score-box" style="background:#e3f2fd; color:#0d47a1;">${m.scoreA} - ${m.scoreB}</span>
+                            <span style="flex:1; text-align:left; font-size:0.9rem; font-weight:bold;">${nameB}</span>
                         </div>
                         <div class="item-actions">
                             <button class="edit-btn" onclick="editMatch('${m.key}')">編集</button>
                             <button class="delete-btn" onclick="deleteMatch('${m.key}')">削除</button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        // --- 対戦スケジュール一覧（日程＆試合入力タブ用：全試合を古い順＝登録順に表示） ---
+        const fixtureListEl = document.getElementById('fixtureList');
+        fixtureListEl.innerHTML = "";
+        
+        if(matchesWithKey.length === 0) {
+            fixtureListEl.innerHTML = "<div style='text-align:center; color:#999; padding:10px;'>スケジュールはありません。上のフォームから対戦カードを登録してください。</div>";
+        } else {
+            // 登録順（古い順）に表示
+            const sortedFixtures = [...matchesWithKey].reverse(); 
+            
+            sortedFixtures.forEach(m => {
+                const nameA = appData.teams[m.teamA]?.name || "削除済";
+                const nameB = appData.teams[m.teamB]?.name || "削除済";
+                const isPlayed = m.status === 'played' || (m.status === undefined && m.scoreA !== undefined && m.scoreA !== "");
+                
+                let statusBadge = "";
+                let actionButtons = "";
+                let scoreDisplay = "";
+                let bgStyle = "";
+                
+                if (isPlayed) {
+                    statusBadge = `<span style="background:#81C784; color:white; font-size:0.75rem; padding:2px 6px; border-radius:3px; font-weight:bold; margin-right:8px;">終了</span>`;
+                    scoreDisplay = `<span class="score-box">${m.scoreA} - ${m.scoreB}</span>`;
+                    actionButtons = `
+                        <button class="edit-btn" onclick="startScoreInput('${m.key}')">結果編集</button>
+                        <button class="delete-btn" onclick="deleteMatch('${m.key}')">削除</button>
+                    `;
+                } else {
+                    statusBadge = `<span style="background:#FFB74D; color:white; font-size:0.75rem; padding:2px 6px; border-radius:3px; font-weight:bold; margin-right:8px;">予定</span>`;
+                    scoreDisplay = `<span class="score-box" style="background:#fff; border:1px dashed #ccc; color:#999;">VS</span>`;
+                    actionButtons = `
+                        <button class="edit-btn" style="background:var(--primary);" onclick="startScoreInput('${m.key}')">スコア入力</button>
+                        <button class="delete-btn" onclick="deleteMatch('${m.key}')">削除</button>
+                    `;
+                    bgStyle = "background-color: #fafafa;";
+                }
+                
+                fixtureListEl.innerHTML += `
+                    <div class="list-item" style="${bgStyle} padding: 12px 10px;">
+                        <div class="match-info">
+                            <span style="flex:1; text-align:right; font-size:0.9rem; font-weight:${isPlayed?'bold':'normal'};">${nameA}</span>
+                            <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+                                ${statusBadge}
+                                ${scoreDisplay}
+                            </div>
+                            <span style="flex:1; text-align:left; font-size:0.9rem; font-weight:${isPlayed?'bold':'normal'};">${nameB}</span>
+                        </div>
+                        <div class="item-actions">
+                            ${actionButtons}
                         </div>
                     </div>
                 `;
@@ -376,6 +563,11 @@
 
         Object.values(appData.matches || {}).forEach(m => {
             if(!stats[m.teamA] || !stats[m.teamB]) return;
+            
+            // スコア未入力（予定）の試合はスキップ
+            const isPlayed = m.status === 'played' || (m.status === undefined && m.scoreA !== undefined && m.scoreA !== "");
+            if (!isPlayed) return;
+            
             const sA = parseInt(m.scoreA);
             const sB = parseInt(m.scoreB);
             
@@ -417,5 +609,10 @@
         if(tabBtn) tabBtn.classList.add('active');
     }
 </script>
+<!-- トースト通知 -->
+<div id="toastNotification" class="toast-container">
+    <span>🔔</span>
+    <span class="toast-text">データが更新されました</span>
+</div>
 </body>
 </html>
