@@ -89,12 +89,13 @@
         <h2>大会IDを入力</h2>
         <input type="text" id="leagueIdInput" placeholder="例: cup2025" style="text-align:center; font-size:1.2rem;">
         
-        <div style="margin-bottom: 15px; text-align: center;">
-            <label style="font-weight: bold; margin-right: 10px; font-size: 1rem; color: var(--primary);">ユーザー区分:</label>
-            <select id="userRoleInput" style="width: auto; display: inline-block; padding: 5px 15px; font-size: 1rem; margin-bottom: 0;">
-                <option value="general">一般（閲覧専用）</option>
-                <option value="referee">審判・管理者（編集可能）</option>
-            </select>
+        <div style="margin-bottom: 20px; text-align: center;">
+            <label style="font-weight: bold; display: block; margin-bottom: 10px; font-size: 1rem; color: var(--primary);">ユーザー区分:</label>
+            <div style="display: flex; background: #eee; border-radius: 8px; overflow: hidden; max-width: 400px; margin: 0 auto;">
+                <div id="roleTabGeneral" onclick="selectRole('general')" style="flex: 1; padding: 12px; text-align: center; cursor: pointer; font-weight: bold; background: var(--primary); color: white;">一般（閲覧専用）</div>
+                <div id="roleTabReferee" onclick="selectRole('referee')" style="flex: 1; padding: 12px; text-align: center; cursor: pointer; font-weight: bold; background: #eee; color: #333;">審判・管理者</div>
+            </div>
+            <input type="hidden" id="userRoleInput" value="general">
         </div>
         
         <button onclick="joinLeague()">参加 / 作成する</button>
@@ -123,6 +124,8 @@
                 <h3>試合結果一覧</h3>
                 <div id="matchList"></div>
             </div>
+            
+            <button onclick="logoutLeague()" style="background:#666; margin-top:20px;">ログアウト</button>
         </div>
 
         <div id="inputMatch" class="content">
@@ -660,13 +663,34 @@
         if(tabBtn) tabBtn.classList.add('active');
     }
 
+    // --- ログイン画面の役割選択タブ処理 ---
+    function selectRole(role) {
+        document.getElementById('userRoleInput').value = role;
+        const tabGen = document.getElementById('roleTabGeneral');
+        const tabRef = document.getElementById('roleTabReferee');
+        if (role === 'general') {
+            tabGen.style.background = 'var(--primary)';
+            tabGen.style.color = 'white';
+            tabRef.style.background = '#eee';
+            tabRef.style.color = '#333';
+        } else {
+            tabRef.style.background = 'var(--primary)';
+            tabRef.style.color = 'white';
+            tabGen.style.background = '#eee';
+            tabGen.style.color = '#333';
+        }
+    }
+
     // --- 自動ログイン処理 ---
     window.addEventListener('DOMContentLoaded', () => {
         const savedId = localStorage.getItem('savedLeagueId');
         const savedRole = localStorage.getItem('savedUserRole') || 'general';
+        
+        // UIの初期状態をセット
+        selectRole(savedRole);
+
         if (savedId) {
             document.getElementById('leagueIdInput').value = savedId;
-            document.getElementById('userRoleInput').value = savedRole;
             joinLeague();
         }
     });
