@@ -88,6 +88,7 @@
 
         /* 試合順ラベル・区切り線 */
         .match-no { font-size: 0.75rem; font-weight: bold; color: var(--primary); background: #e3f2fd; border-radius: 3px; padding: 2px 6px; white-space: nowrap; flex-shrink: 0; }
+        .stage-label { font-size: 0.75rem; font-weight: bold; color: #fff; background: #E65100; border-radius: 3px; padding: 2px 6px; white-space: nowrap; margin-left: 4px; }
         .section-label { font-size: 0.85rem; font-weight: bold; color: #555; margin: 4px 0; }
         .match-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 6px; color: #E65100; font-weight: bold; font-size: 0.85rem; }
         .match-divider::before, .match-divider::after { content: ""; flex: 1; border-top: 2px dashed #FFB74D; }
@@ -217,6 +218,9 @@
                 <h3>試合結果・試合予定</h3>
                 <div id="matchList"></div>
             </div>
+
+            <!-- 順位決定戦の組み合わせ作成（管理者のみ） -->
+            <button id="placementBtn" onclick="createPlacementMatches()" style="background:#E65100;">🏆 順位決定組み合わせ作成</button>
             
             <button id="standingsLogoutBtn" onclick="logoutLeague()" style="background:#666; margin-top:20px;">ログアウト</button>
         </div>
@@ -425,6 +429,7 @@
             if(inputMatchTab) inputMatchTab.style.display = 'none';
             if(settingsTab) settingsTab.style.display = 'none';
             document.getElementById('standingsLogoutBtn').style.display = 'none';
+            document.getElementById('placementBtn').style.display = 'none';
             showTab('standings'); // 強制的に順位表タブへ
         } else {
             if(inputMatchTab) inputMatchTab.style.display = 'block';
@@ -893,7 +898,7 @@
         const prev = sel.value;
         const upcoming = orderedMatches.filter(m => !isMatchPlayed(m));
         sel.innerHTML = '<option value="">チームを指定しない（表・裏）</option>' + upcoming.map(m =>
-            `<option value="${m.key}">第${m.no}試合　${escapeHtml(teamName(m.teamA))} vs ${escapeHtml(teamName(m.teamB))}</option>`
+            `<option value="${m.key}">第${m.no}試合${m.label ? '（' + escapeHtml(m.label) + '）' : ''}　${escapeHtml(teamName(m.teamA))} vs ${escapeHtml(teamName(m.teamB))}</option>`
         ).join('');
 
         if (!tossSelectTouched && upcoming.length) {
@@ -1034,7 +1039,7 @@
 
         let html = `
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span class="match-no" style="font-size:0.9rem;">第${match.no}試合</span>
+                <span><span class="match-no" style="font-size:0.9rem;">第${match.no}試合</span>${stageLabel(match)}</span>
                 ${statusBadge}
             </div>
             <div class="detail-score">
@@ -1082,6 +1087,100 @@
     }
 
     window.addEventListener('popstate', renderRoute);
+
+    // --- 順位表計算（リーグ戦のみ。順位決定戦は含めない） ---
+    function computeStandings() {
+        const stats = {};
+        Object.values(appData.teams || {}).forEach(t => {
+            stats[t.id] = { id: t.id, name: t.name, pts: 0, gd: 0, played: 0, gf: 0 };
+        });
+
+        Object.values(appData.matches || {}).forEach(m => {
+            if (m.stage === 'placement') return;
+            if (!stats[m.teamA] || !stats[m.teamB]) return;
+            if (!isMatchPlayed(m)) return; // スコア未入力（予定）の試合はスキップ
+
+            const sA = parseInt(m.scoreA);
+            const sB = parseInt(m.scoreB);
+
+            stats[m.teamA].played++; stats[m.teamB].played++;
+            stats[m.teamA].gd += (sA - sB); stats[m.teamB].gd += (sB - sA);
+            stats[m.teamA].gf += sA; stats[m.teamB].gf += sB;
+
+            if (sA > sB) { stats[m.teamA].pts += 3; }
+            else if (sA < sB) { stats[m.teamB].pts += 3; }
+            else { stats[m.teamA].pts += 1; stats[m.teamB].pts += 1; }
+        });
+
+        return Object.values(stats).sort((a, b) => {
+            if (b.pts !== a.pts) return b.pts - a.pts;
+            if (b.gd !== a.gd) return b.gd - a.gd;
+            return b.gf - a.gf;
+        });
+    }
+
+    function stageLabel(m) {
+        return m.label ? `<span class="stage-label">${escapeHtml(m.label)}</span>` : '';
+    }
+
+    // --- 順位決定戦の組み合わせ作成 ---
+    // 順位表の上から2チームずつ組み（1位vs2位 → 1位決定戦, 3位vs4位 → 3位決定戦 ...）、
+    // 試合順は下位の決定戦から順に並べて、既存の試合の後ろに追加する
+    function createPlacementMatches() {
+        if (currentUserRole !== 'referee') return;
+        const standings = computeStandings();
+        if (standings.length < 2) return alert("順位決定戦を作成するには2チーム以上必要です");
+
+        const leagueMatches = Object.values(appData.matches || {}).filter(m => m.stage !== 'placement');
+        const unplayed = leagueMatches.filter(m => !isMatchPlayed(m)).length;
+
+        const pairs = [];
+        for (let i = 0; i + 1 < standings.length; i += 2) {
+            pairs.push({ rank: i + 1, teamA: standings[i], teamB: standings[i + 1] });
+        }
+        pairs.reverse(); // 下位の決定戦から
+        const leftover = standings.length % 2 === 1 ? standings[standings.length - 1] : null;
+
+        const existing = getOrderedMatches().filter(m => m.stage === 'placement');
+
+        let msg = "現在の順位で以下の順位決定戦を作成します。\n\n" +
+            pairs.map(p => `${p.rank}位決定戦：${p.teamA.name} vs ${p.teamB.name}`).join('\n');
+        if (leftover) msg += `\n\n※ ${standings.length}位の「${leftover.name}」は対戦相手がいないため組み合わせに含まれません。`;
+        if (unplayed > 0) msg += `\n\n⚠ リーグ戦に未終了の試合が${unplayed}試合あります。`;
+        if (existing.length > 0) {
+            const playedCount = existing.filter(isMatchPlayed).length;
+            msg += `\n\n⚠ 作成済みの順位決定戦（${existing.length}試合${playedCount ? `、うち結果入力済み${playedCount}試合` : ''}）は削除して作り直します。`;
+        }
+        msg += "\n\nよろしいですか？";
+        if (!confirm(msg)) return;
+
+        const updates = {};
+        existing.forEach(m => { updates['matches/' + m.key] = null; });
+
+        // 残す試合の順番を詰め直し、その後ろに順位決定戦を追加
+        const remaining = getOrderedMatches().filter(m => m.stage !== 'placement');
+        Object.assign(updates, buildOrderUpdates(remaining));
+
+        const matchesRef = db.ref('leagues/' + currentLeagueId + '/matches');
+        pairs.forEach((p, idx) => {
+            const key = matchesRef.push().key;
+            updates['matches/' + key] = {
+                teamA: p.teamA.id,
+                teamB: p.teamB.id,
+                scoreA: "",
+                scoreB: "",
+                status: 'scheduled',
+                stage: 'placement',
+                label: `${p.rank}位決定戦`,
+                order: remaining.length + idx + 1,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            };
+        });
+
+        db.ref('leagues/' + currentLeagueId).update(updates)
+            .then(() => showToast(`順位決定戦を${pairs.length}試合作成しました`))
+            .catch(e => alert("作成に失敗しました: " + e.message));
+    }
 
     // --- 4. 描画・計算処理 ---
 
@@ -1150,7 +1249,7 @@
             return `
                 <div class="${played ? '' : 'upcoming-row'}" style="border-bottom:1px solid #eee; padding:8px 4px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; min-height:24px;">
-                        <span class="match-no">第${m.no}試合</span>
+                        <span><span class="match-no">第${m.no}試合</span>${stageLabel(m)}</span>
                         ${buttons ? `<div class="item-actions">${buttons}</div>` : ''}
                     </div>
                     <div class="match-info" style="margin-top:4px;">
@@ -1204,7 +1303,7 @@
                             <div style="display:flex; align-items:center; gap:4px;">
                                 <button class="order-btn" title="前の試合と入れ替え" onclick="moveMatch('${m.key}', -1)" ${idx === 0 ? 'disabled style="opacity:0.3;"' : ''}>▲</button>
                                 <button class="order-btn" title="次の試合と入れ替え" onclick="moveMatch('${m.key}', 1)" ${idx === orderedMatches.length - 1 ? 'disabled style="opacity:0.3;"' : ''}>▼</button>
-                                <span class="match-no">第${m.no}試合</span>
+                                <span class="match-no">第${m.no}試合</span>${stageLabel(m)}
                                 ${statusBadge}
                             </div>
                             <div class="item-actions">
@@ -1222,35 +1321,7 @@
         }
 
         // --- 順位表計算 ---
-        let stats = {};
-        teams.forEach(t => {
-            stats[t.id] = { name: t.name, pts: 0, gd: 0, played: 0, gf: 0 };
-        });
-
-        Object.values(appData.matches || {}).forEach(m => {
-            if(!stats[m.teamA] || !stats[m.teamB]) return;
-            
-            // スコア未入力（予定）の試合はスキップ
-            const isPlayed = m.status === 'played' || (m.status === undefined && m.scoreA !== undefined && m.scoreA !== "");
-            if (!isPlayed) return;
-            
-            const sA = parseInt(m.scoreA);
-            const sB = parseInt(m.scoreB);
-            
-            stats[m.teamA].played++; stats[m.teamB].played++;
-            stats[m.teamA].gd += (sA - sB); stats[m.teamB].gd += (sB - sA);
-            stats[m.teamA].gf += sA; stats[m.teamB].gf += sB;
-
-            if(sA > sB) { stats[m.teamA].pts += 3; }
-            else if(sA < sB) { stats[m.teamB].pts += 3; }
-            else { stats[m.teamA].pts += 1; stats[m.teamB].pts += 1; }
-        });
-
-        const sorted = Object.values(stats).sort((a,b) => {
-            if(b.pts !== a.pts) return b.pts - a.pts;
-            if(b.gd !== a.gd) return b.gd - a.gd;
-            return b.gf - a.gf;
-        });
+        const sorted = computeStandings();
 
         const tbody = document.getElementById('standingsBody');
         tbody.innerHTML = "";
