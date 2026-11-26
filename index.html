@@ -88,6 +88,7 @@
 
         /* 試合順ラベル・区切り線 */
         .match-no { font-size: 0.75rem; font-weight: bold; color: var(--primary); background: #e3f2fd; border-radius: 3px; padding: 2px 6px; white-space: nowrap; flex-shrink: 0; }
+        .pk-score { display: block; font-size: 0.7rem; font-weight: bold; color: #E65100; line-height: 1.2; }
         .stage-label { font-size: 0.75rem; font-weight: bold; color: #fff; background: #E65100; border-radius: 3px; padding: 2px 6px; white-space: nowrap; margin-left: 4px; }
         .section-label { font-size: 0.85rem; font-weight: bold; color: #555; margin: 4px 0; }
         .match-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 6px; color: #E65100; font-weight: bold; font-size: 0.85rem; }
@@ -113,7 +114,8 @@
         #matchDetail { display: none; }
         .detail-score { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 15px 0; }
         .detail-score .team { flex: 1; font-weight: bold; font-size: 1.05rem; }
-        .detail-score .score { font-size: 2rem; font-weight: bold; color: var(--primary); white-space: nowrap; }
+        .detail-score .score { font-size: 2rem; font-weight: bold; color: var(--primary); white-space: nowrap; text-align: center; }
+        .detail-score .pk-score { font-size: 0.9rem; }
         .stat-table td:first-child, .stat-table td:last-child { font-weight: bold; font-size: 1.05rem; width: 25%; }
         .stat-table td:nth-child(2) { color: #666; }
         .card-dot { display: inline-block; width: 10px; height: 14px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
@@ -274,9 +276,19 @@
                 <input type="hidden" id="teamB">
 
                 <div style="display:flex; gap:10px; justify-content: center; align-items: center;">
-                    <input type="number" id="scoreA" placeholder="点" style="text-align: center; font-size: 1.2rem; width: 80px; margin-bottom: 0;">
+                    <input type="number" id="scoreA" placeholder="点" oninput="updatePkVisibility()" style="text-align: center; font-size: 1.2rem; width: 80px; margin-bottom: 0;">
                     <span style="font-size: 1.5rem; font-weight: bold;">-</span>
-                    <input type="number" id="scoreB" placeholder="点" style="text-align: center; font-size: 1.2rem; width: 80px; margin-bottom: 0;">
+                    <input type="number" id="scoreB" placeholder="点" oninput="updatePkVisibility()" style="text-align: center; font-size: 1.2rem; width: 80px; margin-bottom: 0;">
+                </div>
+
+                <!-- PK戦（順位決定戦で同点のときのみ表示） -->
+                <div id="pkInputRow" style="display:none; margin-top:12px; padding:10px; background:#FFF3E0; border-radius:6px; text-align:center;">
+                    <div style="font-size:0.85rem; font-weight:bold; color:#E65100; margin-bottom:6px;">PK戦</div>
+                    <div style="display:flex; gap:10px; justify-content: center; align-items: center;">
+                        <input type="number" id="pkA" placeholder="PK" min="0" style="text-align: center; font-size: 1.1rem; width: 70px; margin-bottom: 0;">
+                        <span style="font-size: 1.3rem; font-weight: bold;">-</span>
+                        <input type="number" id="pkB" placeholder="PK" min="0" style="text-align: center; font-size: 1.1rem; width: 70px; margin-bottom: 0;">
+                    </div>
                 </div>
 
                 <details class="detail-input" id="detailInputBox">
@@ -666,6 +678,9 @@
         const isScheduled = match.status === 'scheduled';
         document.getElementById('scoreA').value = isScheduled ? "" : (match.scoreA !== undefined ? match.scoreA : "");
         document.getElementById('scoreB').value = isScheduled ? "" : (match.scoreB !== undefined ? match.scoreB : "");
+        document.getElementById('pkA').value = isScheduled ? "" : (match.pkA ?? "");
+        document.getElementById('pkB').value = isScheduled ? "" : (match.pkB ?? "");
+        updatePkVisibility();
 
         // 詳細記録（任意項目）をセット
         const d = match.details || {};
@@ -706,6 +721,16 @@
 
         if (!tA || !tB || tA === tB || sA === "" || sB === "") return alert("得点を入力してください");
 
+        // PK戦（順位決定戦で同点の場合は必須）
+        let pkA = null, pkB = null;
+        if (isPkNeeded()) {
+            const vA = document.getElementById('pkA').value, vB = document.getElementById('pkB').value;
+            if (vA === "" || vB === "") return alert("同点のため、PK戦の結果を入力してください");
+            pkA = parseInt(vA); pkB = parseInt(vB);
+            if (isNaN(pkA) || isNaN(pkB) || pkA < 0 || pkB < 0) return alert("PK戦の得点は0以上の数字で入力してください");
+            if (pkA === pkB) return alert("PK戦は勝敗がつく結果を入力してください");
+        }
+
         // 詳細記録（任意）：入力されている項目だけ保存
         const details = {};
         for (const f of STAT_FIELDS) {
@@ -737,6 +762,8 @@
             teamB: tB,
             scoreA: parseInt(sA),
             scoreB: parseInt(sB),
+            pkA: pkA,
+            pkB: pkB,
             status: 'played',
             details: Object.keys(details).length ? details : null,
             timestamp: firebase.database.ServerValue.TIMESTAMP
@@ -774,6 +801,9 @@
         editingMatchKey = null;
         document.getElementById('scoreA').value = "";
         document.getElementById('scoreB').value = "";
+        document.getElementById('pkA').value = "";
+        document.getElementById('pkB').value = "";
+        document.getElementById('pkInputRow').style.display = "none";
         document.getElementById('teamA').value = "";
         document.getElementById('teamB').value = "";
         document.getElementById('statInputs').innerHTML = "";
@@ -1044,7 +1074,7 @@
             </div>
             <div class="detail-score">
                 <span class="team" style="text-align:right;">${nameA}</span>
-                <span class="score">${played ? `${match.scoreA} - ${match.scoreB}` : 'VS'}</span>
+                <span class="score">${played ? scoreHtml(match) : 'VS'}</span>
                 <span class="team" style="text-align:left;">${nameB}</span>
             </div>
         `;
@@ -1117,6 +1147,27 @@
             if (b.gd !== a.gd) return b.gd - a.gd;
             return b.gf - a.gf;
         });
+    }
+
+    function hasPk(m) {
+        return m.pkA !== undefined && m.pkA !== null && m.pkB !== undefined && m.pkB !== null;
+    }
+
+    // スコア表示用HTML（PK戦があれば下に小さく表示）
+    function scoreHtml(m) {
+        return `${m.scoreA} - ${m.scoreB}` + (hasPk(m) ? `<span class="pk-score">PK ${m.pkA}-${m.pkB}</span>` : '');
+    }
+
+    // 編集中の試合が順位決定戦で、入力スコアが同点ならPK戦が必要
+    function isPkNeeded() {
+        const m = editingMatchKey ? (appData.matches || {})[editingMatchKey] : null;
+        if (!m || m.stage !== 'placement') return false;
+        const sA = document.getElementById('scoreA').value, sB = document.getElementById('scoreB').value;
+        return sA !== "" && sB !== "" && parseInt(sA) === parseInt(sB);
+    }
+
+    function updatePkVisibility() {
+        document.getElementById('pkInputRow').style.display = isPkNeeded() ? 'block' : 'none';
     }
 
     function stageLabel(m) {
@@ -1238,7 +1289,7 @@
             const nameA = escapeHtml(appData.teams[m.teamA]?.name || "削除済");
             const nameB = escapeHtml(appData.teams[m.teamB]?.name || "削除済");
             const score = played
-                ? `<span class="score-box" style="background:#e3f2fd; color:#0d47a1;">${m.scoreA} - ${m.scoreB}</span>`
+                ? `<span class="score-box" style="background:#e3f2fd; color:#0d47a1;">${scoreHtml(m)}</span>`
                 : `<span class="score-box" style="background:#fff; border:1px dashed #ccc; color:#999;">VS</span>`;
             let buttons = played ? `<button class="detail-btn" onclick="openMatchDetail('${m.key}')">結果</button>` : "";
             if (isAdmin) {
@@ -1291,7 +1342,7 @@
                     ? `<span style="background:#81C784; color:white; font-size:0.75rem; padding:2px 6px; border-radius:3px; font-weight:bold;">終了</span>`
                     : `<span style="background:#FFB74D; color:white; font-size:0.75rem; padding:2px 6px; border-radius:3px; font-weight:bold;">予定</span>`;
                 const scoreDisplay = isPlayed
-                    ? `<span class="score-box">${m.scoreA} - ${m.scoreB}</span>`
+                    ? `<span class="score-box">${scoreHtml(m)}</span>`
                     : `<span class="score-box" style="background:#fff; border:1px dashed #ccc; color:#999;">VS</span>`;
                 const actionButtons = isPlayed
                     ? `<button class="edit-btn" onclick="startScoreInput('${m.key}')">結果編集</button>`
